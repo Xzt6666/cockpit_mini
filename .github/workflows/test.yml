@@ -1,0 +1,60 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Let every version report its own verdict instead of aborting on
+      # the first failure -- a version-specific regression is exactly the
+      # kind of thing the matrix exists to surface.
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run test suite
+        run: pytest -v
+
+      - name: Publish report to job summary
+        # The structured report is written by the conftest hooks, so it
+        # exists even when the run fails -- that is when it matters most.
+        if: always()
+        run: |
+          if [ -f reports/test_report.md ]; then
+            cat reports/test_report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload structured test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-py${{ matrix.python-version }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 14

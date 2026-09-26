@@ -1,0 +1,5 @@
+# Normalize line endings so the Linux CI runners and a Windows dev box
+# check out byte-identical sources.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

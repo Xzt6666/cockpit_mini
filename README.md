@@ -1,5 +1,7 @@
 # cockpit_mini — 仿真数字座舱测试框架
 
+[![tests](https://github.com/Xzt6666/cockpit_mini/actions/workflows/test.yml/badge.svg)](https://github.com/Xzt6666/cockpit_mini/actions/workflows/test.yml)
+
 一个基于 pytest 的测试框架，针对**内存中的数字座舱域控制器 Mock** 构建，
 用于汽车软件测试的学习与作品集展示。无需实车、台架或 HIL 设备：
 车速、挡位等车辆信号、语音输入、蓝牙外设全部为 Mock 实现，
@@ -73,6 +75,19 @@ pytest -s                     # 显示 fixture 生命周期打印
 
 当前测试集：**48 条用例，全部通过。**
 
+## 持续集成
+
+`.github/workflows/test.yml` 在每次 push 到 `main`、以及每个 PR 上自动执行：
+
+* **版本矩阵**：Python 3.10 / 3.11 / 3.12 / 3.13 各自独立跑一遍完整测试集，
+  任一版本失败不影响其余版本出结果（`fail-fast: false`），
+  这样版本相关的回归会精确暴露在具体版本上。
+* **报告回流**：`conftest.py` 产出的结构化报告会追加进该次运行的
+  Job Summary，并作为 artifact 保留 14 天。注意上传步骤用的是
+  `if: always()`——测试失败时报告才最该被看到，不能因为失败就丢掉。
+* 页面顶部的徽章即代表当前 `main` 分支在一台**全新机器**上的真实结果，
+  而不是本地环境。
+
 ## 结构化报告（测试设计 → 执行 → 分析）
 
 `conftest.py` 中的钩子会逐条收集测试记录，并在每次运行结束时
@@ -97,5 +112,5 @@ pytest -s                     # 显示 fixture 生命周期打印
 
 * [ ] 用基于 DBC 定义的 CAN 报文解码器驱动信号，替代字典
 * [ ] 在相同接口背后，将 `MockCockpit` 替换为 socket/串口适配器
-* [ ] GitHub Actions 工作流：pytest + 报告产物上传
+* [x] GitHub Actions 工作流：pytest + 报告产物上传
 * [ ] 集成 Allure / JUnit XML，用于 CI 看板
