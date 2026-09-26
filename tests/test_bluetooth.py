@@ -1,8 +1,8 @@
-"""Bluetooth: pairing -> connect -> disconnect, plus abnormal drops.
+"""蓝牙：配对 → 连接 → 断开，以及异常断开。
 
-The module is an explicit state machine; tests assert on *transitions*
-(state + paired/connected fields), not just booleans, so a refactor
-that keeps behaviour but renames internals still gets caught.
+模块本身是一个显式状态机，所以用例断言的是**状态转移**
+（状态值 + 已配对/已连接字段），而不只是一个布尔值：这样即使以后
+重构改了内部实现，只要行为对得上，测试依然有效。
 """
 
 import pytest
@@ -13,14 +13,14 @@ PHONE = "Pixel_8"
 
 
 def _paired_device(bluetooth_module):
-    """Helper: pair one phone, returning the module for chaining."""
+    """小助手：先把一台手机配对好，然后返回模块本身方便链式调用。"""
     bluetooth_module.start_pairing()
     bluetooth_module.complete_pairing(PHONE)
     return bluetooth_module
 
 
 # ---------------------------------------------------------------------------
-# Normal flow
+# 正常流程
 # ---------------------------------------------------------------------------
 
 
@@ -32,7 +32,7 @@ def test_full_pair_connect_disconnect_cycle(bluetooth_module):
     assert bluetooth_module.state == "pairing"
     bluetooth_module.complete_pairing(PHONE)
     assert PHONE in bluetooth_module.paired_devices
-    assert bluetooth_module.state == "off"  # idle again, bond persists
+    assert bluetooth_module.state == "off"  # 又回到空闲，但配对记录保留
 
     bluetooth_module.connect(PHONE)
     assert bluetooth_module.state == "connected"
@@ -41,62 +41,60 @@ def test_full_pair_connect_disconnect_cycle(bluetooth_module):
     bluetooth_module.disconnect()
     assert bluetooth_module.state == "disconnected"
     assert bluetooth_module.connected_device is None
-    # The pairing bond survives a disconnect (real-world behaviour).
+    # 断开之后配对关系还在，这跟真实车机一致。
     assert PHONE in bluetooth_module.paired_devices
 
 
 def test_connect_second_device_while_connected_fails(bluetooth_module):
-    """Only one HFP/A2DP sink at a time on this simplified head unit."""
+    """这个简化版车机同一时刻只支持一路蓝牙连接。"""
     _paired_device(bluetooth_module)
     bluetooth_module.start_pairing()
     bluetooth_module.complete_pairing("iPhone_15")
     bluetooth_module.connect(PHONE)
-    with pytest.raises(RuntimeError, match="already connected"):
+    with pytest.raises(RuntimeError, match="已经连接了"):
         bluetooth_module.connect("iPhone_15")
 
 
 # ---------------------------------------------------------------------------
-# Abnormal scenarios
+# 异常场景
 # ---------------------------------------------------------------------------
 
 
 def test_connection_lost_out_of_range(bluetooth_module):
-    """Abnormal drop: phone walks out of range / reboots."""
+    """异常断开：手机走出范围 / 重启 / 开飞行模式。"""
     _paired_device(bluetooth_module)
     bluetooth_module.connect(PHONE)
     bluetooth_module.simulate_connection_lost()
     assert bluetooth_module.state == "connection_lost"
     assert bluetooth_module.connected_device is None
-    # Bond is kept; auto-reconnect is allowed from connection_lost.
+    # 配对关系保留，所以可以重新连上（对应车机的自动重连）。
     bluetooth_module.connect(PHONE)
     assert bluetooth_module.state == "connected"
 
 
 def test_connect_unpaired_device_fails(bluetooth_module):
-    """A random nearby phone must not be able to hijack the cabin."""
-    with pytest.raises(RuntimeError, match="not paired"):
+    """旁边一台陌生手机不能随便连上你的车机。"""
+    with pytest.raises(RuntimeError, match="设备未配对"):
         bluetooth_module.connect("Stranger_Phone")
 
 
 def test_pairing_while_connected_fails(bluetooth_module):
     _paired_device(bluetooth_module)
     bluetooth_module.connect(PHONE)
-    with pytest.raises(RuntimeError, match="cannot pair while"):
+    with pytest.raises(RuntimeError, match="不能开始配对"):
         bluetooth_module.start_pairing()
 
 
-def test_disconnect_without_device_fails(bluetooth_module):
-    with pytest.raises(RuntimeError, match="no device connected"):
+def test_disconnect_and_lost_without_connection_fail(bluetooth_module):
+    """没连设备的时候，断开和"模拟异常断开"都应该报错。"""
+    with pytest.raises(RuntimeError, match="没有已连接的设备"):
         bluetooth_module.disconnect()
-
-
-def test_simulate_lost_without_connection_fails(bluetooth_module):
-    with pytest.raises(RuntimeError, match="no device connected"):
+    with pytest.raises(RuntimeError, match="没有已连接的设备"):
         bluetooth_module.simulate_connection_lost()
 
 
 def test_duplicate_pairing_fails(bluetooth_module):
     _paired_device(bluetooth_module)
     bluetooth_module.start_pairing()
-    with pytest.raises(RuntimeError, match="already paired"):
+    with pytest.raises(RuntimeError, match="设备已配对过"):
         bluetooth_module.complete_pairing(PHONE)

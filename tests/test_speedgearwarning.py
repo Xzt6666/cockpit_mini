@@ -1,7 +1,7 @@
-"""Powertrain warnings & interlocks: over-speed, gear shift, reverse camera.
+"""动力告警与互锁：超速提醒、挡位互锁、倒车影像。
 
-These are the safety-relevant rules: a missed case here means a field
-issue, so the tables deliberately probe the exact threshold values.
+这三块是安全相关的规则——漏掉一个边界就是一次现场问题，所以下面
+的参数化表格特意把阈值本身（4.9 / 5、119.9 / 120）一条条测过去。
 """
 
 import pytest
@@ -10,16 +10,16 @@ pytestmark = pytest.mark.speedgearwarning
 
 
 # ---------------------------------------------------------------------------
-# Over-speed warning
+# 超速提醒
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     "speed, expected_level",
     [
-        (0, "none"),
-        (119.9, "none"),   # just below the threshold
-        (120, "overspeed"),  # exactly at the threshold -> warn
+        (0, "none"),          # 停着
+        (119.9, "none"),      # 差一点点到阈值
+        (120, "overspeed"),   # 正好卡在阈值上 → 提醒
         (180, "overspeed"),
     ],
     ids=["standstill", "just_below", "threshold", "way_over"],
@@ -32,7 +32,7 @@ def test_speed_warning_threshold(vehicle_state, speed, expected_level):
 
 @pytest.mark.smoke
 def test_overspeed_chimes_every_check(vehicle_state):
-    """Every evaluation above the threshold raises the chime event."""
+    """每评估一次超速就响一声，次数要能数得出来。"""
     vehicle_state.set_signal("vehicle_speed", 130)
     page = vehicle_state.open_hmi_page("home")
     page.check_speed_warning()
@@ -41,7 +41,7 @@ def test_overspeed_chimes_every_check(vehicle_state):
 
 
 # ---------------------------------------------------------------------------
-# Gear interlock
+# 挡位互锁
 # ---------------------------------------------------------------------------
 
 
@@ -49,34 +49,34 @@ def test_overspeed_chimes_every_check(vehicle_state):
     "speed, expected",
     [
         (0, True),
-        (4.9, True),   # crawling -> still allowed
-        (5, False),    # at the threshold -> rejected (draft had >, spec is >=)
+        (4.9, True),    # 龟速，仍然允许挂 P
+        (5, False),     # 正好卡在阈值上 → 拒绝
         (60, False),
     ],
     ids=["parked", "crawling", "threshold", "moving"],
 )
 def test_park_lock_while_moving(vehicle_state, speed, expected):
-    # Start in D so a successful shift to P is actually observable.
+    # 先挂到 D，这样"成功挂上 P"才是可观察的。
     vehicle_state.set_signal("gear", "D")
     vehicle_state.set_signal("vehicle_speed", speed)
     assert vehicle_state.set_gear("P") is expected
     if expected:
         assert vehicle_state.gear() == "P"
     else:
-        # Rejected shifts leave the gear untouched AND leave evidence.
+        # 被拒绝的挂挡：挡位不能变，而且必须留下证据。
         assert vehicle_state.gear() == "D"
         assert vehicle_state.event_count("gear_shift:P:rejected") == 1
 
 
 def test_drive_gear_allowed_at_any_speed(vehicle_state):
-    """D is always selectable; N too -- only P/R are interlocked."""
+    """D 和 N 任何车速都能挂，只有 P/R 受互锁限制。"""
     vehicle_state.set_signal("vehicle_speed", 100)
     assert vehicle_state.set_gear("D")
     assert vehicle_state.gear() == "D"
 
 
 def test_reverse_rejected_while_moving(vehicle_state):
-    """Shifting to R at speed would damage the transmission."""
+    """车还在动就挂 R，会打坏变速箱，必须拒绝。"""
     vehicle_state.set_signal("vehicle_speed", 30)
     assert not vehicle_state.set_gear("R")
     assert vehicle_state.gear() == "P"
@@ -84,14 +84,14 @@ def test_reverse_rejected_while_moving(vehicle_state):
 
 
 def test_invalid_gear_rejected(vehicle_state):
-    """Garbage from the shifter (e.g. bus corruption) must be rejected."""
+    """换挡杆传来的垃圾数据（比如总线被干扰）必须被挡在入口。"""
     assert not vehicle_state.set_gear("X")
-    with pytest.raises(ValueError, match="invalid gear"):
+    with pytest.raises(ValueError, match="非法挡位"):
         vehicle_state.set_signal("gear", "X")
 
 
 # ---------------------------------------------------------------------------
-# Reverse camera
+# 倒车影像
 # ---------------------------------------------------------------------------
 
 
@@ -106,6 +106,7 @@ def test_reverse_camera_only_in_r(vehicle_state):
 
 
 def test_reverse_camera_disappears_after_shift_out(vehicle_state):
+    """挂出 R 挡之后，倒车影像必须立刻消失。"""
     camera = vehicle_state.open_hmi_page("camera")
     vehicle_state.set_signal("gear", "R")
     assert camera.is_widget_visible("reverse_camera")
