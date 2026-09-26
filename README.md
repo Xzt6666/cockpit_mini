@@ -177,6 +177,87 @@ D 挡的原始值 = 3          ← 查 DBC 里的取值表，3 就叫 "D"
 * `reports/test_report.md` —— 人看的汇总表（用例、结果、耗时、失败原因）
 * `reports/test_report.json` —— 机器可读，可接看板或 Allure 这类下游工具
 
+## 三个值得深聊的设计取舍
+
+这一节不是功能说明，而是三个"**为什么这么做**"的问题。每一条在代码里都有
+对应位置，可以直接打开对照着讲。
+
+### 一、fixture 为什么分两层
+
+一句话：**贵的资源用宽作用域，脏的状态用窄作用域。**
+
+`cockpit_env` 是 session 级的——整个测试运行只创建一次座舱控制器，因为创建它
+成本高，没必要每条用例都重建。而 `vehicle_state` 是函数级的，每条用例都拿到一份
+重新 `reset()` 过的车辆状态：
+
+```python
+@pytest.fixture(scope="session")      # session 级：整个运行共用一个
+def cockpit_env():
+    cockpit = MockCockpit()
+    cockpit.power_on()
+    yield cockpit
+
+@pytest.fixture                          # 函数级：每条用例一份干净的
+def vehicle_state(cockpit_env):
+    cockpit_env.reset()
+    cockpit_env.set_signal("vehicle_speed", 0)
+    cockpit_env.set_signal("gear", "P")
+    return cockpit_env
+```
+
+这样分的好处是**用例之间不可能互相污染**。反过来，如果所有状态都靠 session 级
+共享，上一个用例把车速设成 100，下一个用例就会莫名其妙地失败——"单独跑能过、
+一起跑就挂"这类偶发失败最难查，而分层之后它从根上不会发生。
+
+### 二、为什么"编码再解码"的往返测试不算数
+
+一个很自然的想法是：把数据编码成字节，再解码回来，看结果是否和输入一样。
+问题是——**如果编码和解码错得一模一样，往返测试照样会通过。**
+
+举个具体的例子：小端和大端写反了，编码时按大端写、解码时也按大端读，
+一来一回结果完全一致，但在真车上就是错的。所以 `test_can_bus.py` 断言的是
+**具体的字节**：
+
+```python
+data = encode_message(message, {"VehicleSpeed": 50.0, "GearPosition": "D"})
+assert data == bytes.fromhex("f401030000000000")   # 手工按 DBC 推算出来的答案
+```
+
+`f4 01` 是这么来的：50 ÷ 0.1 = 500 = `0x01F4`，小端所以低位字节在前。
+同时还会反过来测一次——**手写这串字节**，完全不借助 encoder 去解码：
+
+```python
+decoded = decode_message(database.message(256), bytes.fromhex("f401030000000000"))
+assert decoded["VehicleSpeed"] == pytest.approx(50.0)
+```
+
+两个方向都对着同一个"标准答案"，编码器和解码器就不可能一起错。
+
+### 三、为什么拒绝一个操作之后，还要检查事件日志
+
+挡位互锁的规则是"车还在动就不能挂 P 挡"，所以测试里当然要断言返回值是 `False`。
+但只断言这个是不够的——**"明确拒绝"和"静默失败"在返回值上长得一模一样**。
+
+所以每次换挡都会往只追加的事件日志里记一笔：
+
+```python
+allowed, reason = can_shift_gear(target_gear, self.speed_kmh())
+if allowed:
+    self.set_signal("gear", target_gear)
+self.log_event(f"gear_shift:{target_gear}:{'ok' if allowed else 'rejected'}")
+```
+
+测试于是可以进一步断言"日志里确实留下了一条被拒绝的记录"：
+
+```python
+assert vehicle_state.set_gear("P") is False                     # 返回值说"没成功"
+assert vehicle_state.gear() == "D"                              # 挡位确实没变
+assert vehicle_state.event_count("gear_shift:P:rejected") == 1  # 而且是被拒绝的
+```
+
+最后那条断言才真正证明"系统识别出了非法操作并明确拒绝"，而不只是"它没执行"。
+如果哪天代码被改成直接把这段逻辑删掉，返回值仍然是 `False`，但日志断言会立刻失败。
+
 ## 已知简化（面试时可以主动说明）
 
 * 只支持**小端（Intel）字节序**。大端（Motorola）信号的位布局是"锯齿轮廓"，
