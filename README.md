@@ -258,7 +258,7 @@ assert vehicle_state.event_count("gear_shift:P:rejected") == 1  # 而且是被�
 最后那条断言才真正证明"系统识别出了非法操作并明确拒绝"，而不只是"它没执行"。
 如果哪天代码被改成直接把这段逻辑删掉，返回值仍然是 `False`，但日志断言会立刻失败。
 
-## 已知简化（面试时可以主动说明）
+## 注意
 
 * 只支持**小端（Intel）字节序**。大端（Motorola）信号的位布局是"锯齿轮廓"，
   跨字节时要跳到下一个字节的最高位，理解成本高且本项目用不到，
@@ -270,7 +270,7 @@ assert vehicle_state.event_count("gear_shift:P:rejected") == 1  # 而且是被�
 
 ## Roadmap
 
-* [x] 用 DBC 定义的 CAN 报文驱动信号，替代直接传字典
-* [x] GitHub Actions：pytest + 多版本矩阵 + 报告产物上传
+* [√] 用 DBC 定义的 CAN 报文驱动信号，替代直接传字典
+* [√] GitHub Actions：pytest + 多版本矩阵 + 报告产物上传
 * [ ] 在相同接口背后，把 `MockCockpit` 换成 socket / 串口适配器
 * [ ] 集成 Allure / JUnit XML，用于 CI 看板
